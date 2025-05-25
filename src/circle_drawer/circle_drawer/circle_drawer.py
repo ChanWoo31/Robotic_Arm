@@ -120,8 +120,9 @@ if __name__ == '__main__':
 
         # Move to zero position
         for j in JOINT_IDS:
-            controller.set_goal_position(j, 0.0)
+            controller.set_goal_position(j, 150.0)
         time.sleep(2.0)
+        # controller.set_goal_position(3, 150.0)
 
         # IK and FK
         x_d, y_d, z_d, roll_d = input("Enter desired position (x, y, z) and roll angle: ").split()
@@ -131,16 +132,18 @@ if __name__ == '__main__':
         T = 4.0
         dt = 0.02
         t_steps = np.arange(0, T + dt/2, dt)
-        coeffs = [cubic_coeff(0, float(np.rad2deg(qg)), 0,0,T) for qg in q_goal]
+        coeffs = [cubic_coeff(0, float(qg), 0,0,T) for qg in q_goal]
 
         # trajectory generation
         for t in t_steps:
-            degs = [eval_cubic(c, t) for c in coeffs]
+            rads = [eval_cubic(c, t) for c in coeffs]
             for idx, j in enumerate(JOINT_IDS):
-                controller.set_goal_position(j, degs[idx])
-                time.sleep(dt)
+                deg = 150.0 + np.rad2deg(rads[idx])
+                controller.set_goal_position(j, deg)
+            time.sleep(dt)
 
-            time.sleep(0.5)
+        # degs = [eval_cubic(c, T) for c in coeffs]
+        # controller.set_goal_position(3, 150.0 + degs[0])
 
     finally:
         # Disable torque and close port
