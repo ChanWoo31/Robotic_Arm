@@ -18,14 +18,12 @@ TORQUE_DISABLE          = 0
 JOINT_IDS = [1, 2, 3, 4]
 
 # Convert radians to Dynamixel position units
-def rad_to_dxl(rad):
-    # 0 ~ 2*pi maps to 0 ~ 4095
-    pos = int((rad % (2*np.pi)) * 4096.0 / (2*np.pi))
-    return pos
+def deg_to_dxl(deg: float) -> int:
+    deg = max(0.0, min(300.0, deg))
+    return int(deg / 300.0 * 1023)
 
-# Convert Dynamixel position units to radians
-def dxl_to_rad(val):
-    return val * (2*np.pi) / 4096.0
+def dxl_to_deg(val: int) -> float:
+    return val / 1023.0 * 300.0
 
 class DXLController:
     def __init__(self, device=DEVICENAME, baud=BAUDRATE):
@@ -45,13 +43,13 @@ class DXLController:
         for dxl_id in ids:
             self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
 
-    def set_goal_position(self, dxl_id, rad):
-        pos = rad_to_dxl(rad)
+    def set_goal_position(self, dxl_id, deg):
+        pos = deg_to_dxl(deg)
         self.packet.write4ByteTxRx(self.port, dxl_id, ADDR_GOAL_POSITION, pos)
 
     def get_present_position(self, dxl_id):
         val, _, _ = self.packet.read4ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
-        return dxl_to_rad(val)
+        return dxl_to_deg(val)
 
     def close(self):
         self.port.closePort()
