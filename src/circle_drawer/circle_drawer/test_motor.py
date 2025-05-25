@@ -18,8 +18,8 @@ TORQUE_ENABLE   = 1
 TORQUE_DISABLE  = 0
 
 JOINT_IDS       = [1, 2, 3, 4]
-moving_speed    = 100        
-goal_position   = 0            
+moving_speed    = 256        
+goal_position   = int(input("목표 위치 (0~300도): "))
 
 def deg_to_dxl(deg: float) -> int:
     deg = max(0.0, min(300.0, deg))
@@ -60,11 +60,16 @@ def main():
         return
 
     # 토크 인에이블 및 목표값 세팅
-    for dxl_id in JOINT_IDS:
-        enable_torque(port_handler, packet_handler, dxl_id)
-        set_moving_speed(port_handler, packet_handler, dxl_id, moving_speed)
-        set_goal_position(port_handler, packet_handler, dxl_id, goal_position)
-        time.sleep(0.05)
+    # for dxl_id in JOINT_IDS:
+    #     enable_torque(port_handler, packet_handler, dxl_id)
+    #     set_moving_speed(port_handler, packet_handler, dxl_id, moving_speed)
+    #     set_goal_position(port_handler, packet_handler, dxl_id, goal_position)
+    #     time.sleep(0.05)
+
+    dxl_id = JOINT_IDS[2]  # 3 번째 모터 test
+    enable_torque(port_handler, packet_handler, dxl_id)
+    set_moving_speed(port_handler, packet_handler, dxl_id, moving_speed)
+    set_goal_position(port_handler, packet_handler, dxl_id, deg_to_dxl(goal_position))
 
     # 동작 완료 대기
     time.sleep(1.0)
