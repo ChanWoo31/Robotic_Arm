@@ -1,41 +1,43 @@
 import time
 import numpy as np
-from dynamixel_sdk import PortHandler, PacketHandler, COMM_SUCCESS
+from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
+import sys
 
-DEVICENAME        = '/dev/ttyUSB0'
-BAUDRATE          = 1000000
-PROTOCOL_VERSION  = 1
-
-
-ADDR_TORQUE_ENABLE    = 24
-ADDR_GOAL_POSITION    = 30        # 2 byte
-ADDR_MOVING_SPEED     = 32        # 2 byte
-ADDR_PRESENT_POSITION = 36        # 2 byte
-ADDR_PRESENT_SPEED    = 38        # 2 byte
-
-TORQUE_ENABLE   = 1
-TORQUE_DISABLE  = 0
-
-# Joint IDs
 JOINT_IDS = [1, 2, 3, 4]
+JOINT_ZERO_OFFSET = [150.0, 150.0, 150.0, 150.0]
+JOINT_DIRECTION = [1, 1, 1, 1]
+JOINT_LIMIT_MIN = [0.0, 0.0, 0.0, 0.0]
+JOINT_LIMIT_MAX = [300.0, 300.0, 300.0, 300.0]
 
-# Convert radians to Dynamixel position units
-def deg_to_dxl(deg: float) -> int:
+DEVICENAME = '/dev/ttyUSB0'
+BAUDRATE = 1000000
+PROTOCOL_VERSION = 1.0
+
+ADDR_TORQUE_ENABLE = 24
+ADDR_GOAL_POSITION = 30
+ADDR_PRESENT_POSITION = 36
+
+TORQUE_ENABLE = 1
+TORQUE_DISABLE = 0
+
+d1, a2, a3, a4 = 0.135, 0.125, 0.175, 0.055
+
+def deg2dxl(deg: float) -> int:
     deg = max(0.0, min(300.0, deg))
     return int(deg / 300.0 * 1023)
 
-def dxl_to_deg(val: int) -> float:
+def dxl2deg(val: int) -> float:
     return val / 1023.0 * 300.0
 
-class DXLController:
+class Controller:
     def __init__(self, device=DEVICENAME, baud=BAUDRATE):
-        # Port & packet
         self.port = PortHandler(device)
         if not self.port.openPort():
-            raise IOError(f"Failed to open port {device}")
+            raise IOError(f"Fail")
         if not self.port.setBaudRate(baud):
-            raise IOError(f"Failed to set baudrate {baud}")
+            raise IOError(f"Fail")
         self.packet = PacketHandler(PROTOCOL_VERSION)
+        self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 2)
 
     def enable_torque(self, ids):
         for dxl_id in ids:
@@ -45,33 +47,39 @@ class DXLController:
         for dxl_id in ids:
             self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
 
-    def set_goal_position(self, dxl_id, deg):
-        pos = deg_to_dxl(deg)
-        self.packet.write2ByteTxRx(self.port, dxl_id, ADDR_GOAL_POSITION, pos)
-
+    def set_goal_positions(self, deg_list):
+        self.sync_write.clearParam()
+        for idx, dxl_id in enumerate(JOINT_IDS):
+            pos = deg2dxl(deg_list[idx])
+            param = [pos & 0xFF, (pos >> 8) & 0xFF]
+            self.sync_write.addParam(dxl_id, bytes(param))
+        result = self.sync_write.txPacket()
+        if result != COMM_SUCCESS:
+            raise RuntimeError("SyncWrite 통신 오류")
+        
     def get_present_position(self, dxl_id):
-        val, _, _ = self.packet.read2ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
-        return dxl_to_deg(val)
-
+        val, comm_result, error = self.packet.read2ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
+        if comm_result != COMM_SUCCESS:
+            raise RuntimeError(f"Dynamixel 통신 오류 (ID={dxl_id})")
+        if error != 0:
+            raise RuntimeError(f"Dynamixel 에러 (ID={dxl_id}, error={error})")
+        return dxl2deg(val)
+    
     def close(self):
         self.port.closePort()
 
-# robot hardware parameter(m)
-d1, a2, a3, a4 = 0.135, 0.125, 0.175, 0.055
-
-
 def DH_matrix(theta, d, a, alpha):
-    return np.array(
-        [[np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
-         [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
-         [0, np.sin(alpha), np.cos(alpha), d],
-         [0, 0, 0, 1]]
-    )
+    return np.array([
+        [np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
+        [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
+        [0, np.sin(alpha), np.cos(alpha), d],
+        [0, 0, 0, 1]
+    ])
 
 def forward_kinematics(q):
     theta1, theta2, theta3, theta4 = q
     A1 = DH_matrix(-theta1, d1, 0, np.deg2rad(90))
-    A2 = DH_matrix(-theta2-np.deg2rad(90), 0, a2, 0)
+    A2 = DH_matrix(-theta2+np.deg2rad(90), 0, a2, 0)
     A3 = DH_matrix(-theta3, 0, a3, 0)
     A4 = DH_matrix(-theta4, 0, a4, 0)
     T04 = A1 @ A2 @ A3 @ A4
@@ -79,17 +87,16 @@ def forward_kinematics(q):
     roll = -(theta2 + theta3 + theta4)
     return pos, roll
 
-def cubic_coeff(theta_i, theta_f, dtheta_i = 0.0, dtheta_f = 0.0, T = 2.0):
-    #3rd 
+def cubic_coeff(theta_i, theta_f, dtheta_i=0.0, dtheta_f=0.0, T=2.0):
     a0 = theta_i
     a1 = dtheta_i
-    a2 = (3 * (theta_f - theta_i) - (2 * dtheta_i + dtheta_f) * T) / (T**2)
-    a3 = (2 * (theta_i - theta_f) + (dtheta_i + dtheta_f) * T) / (T**3)
+    a2 = (3 * (theta_f - theta_i) - (2 * dtheta_i + dtheta_f) * T) / (T ** 2)
+    a3 = (2 * (theta_i - theta_f) + (dtheta_i + dtheta_f) * T) / (T ** 3)
     return a0, a1, a2, a3
 
 def eval_cubic(coeffs, t):
     a0, a1, a2, a3 = coeffs
-    return a0 + a1 * t + a2 * t**2 + a3 * t**3
+    return a0 + a1 * t + a2 * t ** 2 + a3 * t ** 3
 
 def inverse_kinematics(x, y, z, roll):
     theta1 = np.arctan2(y, x)
@@ -105,55 +112,68 @@ def inverse_kinematics(x, y, z, roll):
     theta4 = roll - theta2 - theta3
     return np.array([theta1, theta2, theta3, theta4])
 
-def get_robot_pos(matrix):
-    return np.array(matrix[0:2, 3])
-
-def get_robot_orientation(matrix):
-    return np.array(matrix[0:2, 0:2])
-
 if __name__ == '__main__':
-    controller = DXLController()
+    global controller
+    controller = Controller()
     try:
-        # Enable torque on all joints
         controller.enable_torque(JOINT_IDS)
         time.sleep(0.1)
 
-        # Move to zero position
-        for j in JOINT_IDS:
-            controller.set_goal_position(j, 150.0)
+        controller.set_goal_positions(JOINT_ZERO_OFFSET)
         time.sleep(2.0)
 
         q_current = []
-        for j in JOINT_IDS:
+        for idx, j in enumerate(JOINT_IDS):
             deg = controller.get_present_position(j)
-            q_current.append(np.deg2rad(deg - 150.0))
+            q_cur = JOINT_DIRECTION[idx] * np.deg2rad(deg - JOINT_ZERO_OFFSET[idx])
+            q_current.append(q_cur)
+        q_current = np.array(q_current)
 
-        # IK and FK
-        x_d, y_d, z_d, roll_d = input("Enter desired position (x, y, z) and roll angle: ").split()
-        roll_d = np.deg2rad(float(roll_d))
-        q_goal = inverse_kinematics(float(x_d), float(y_d), float(z_d), roll_d)
+        # (단위: m, deg)
+        while True:
+            try:
+                vals = input("목표 위치 입력 (x[m], y[m], z[m], roll[deg]) : ").split()
+                if len(vals) != 4:
+                    print("4개 값(x y z roll)을 입력하세요.")
+                    continue
+                x_d, y_d, z_d, roll_d = map(float, vals)
+                roll_d = np.deg2rad(roll_d)
+                break
+            except Exception as e:
+                print("error")
 
-        # coeff
-        T = 4.0
+        # 목표 조인트각 (rad)
+        q_goal = inverse_kinematics(x_d, y_d, z_d, roll_d)
+
+        # 트레젝토리 설정
+        T = 6.0
         dt = 0.02
         t_steps = np.arange(0, T + dt/2, dt)
-        coeffs = [cubic_coeff(qc, float(qg), 0,0,T) for qc, qg in zip(q_current, q_goal)]
+        coeffs = [cubic_coeff(qc, qg, 0, 0, T) for qc, qg in zip(q_current, q_goal)]
 
-        # trajectory generation
-        for t in t_steps:
+        print("트레젝토리 시작!")
+        start = time.time()
+        for step, t in enumerate(t_steps):
             rads = [eval_cubic(c, t) for c in coeffs]
-            for idx, j in enumerate(JOINT_IDS):
-                deg = 150.0 - np.rad2deg(rads[idx])
-                deg = max(0.0, min(300.0, deg))
-                controller.set_goal_position(j, deg)
-                print(f"joint {j} : {deg:.2f} , {deg_to_dxl(deg):.2f}")
-            time.sleep(dt)
+            deg_list = []
+            for idx in range(4):
+                deg = JOINT_ZERO_OFFSET[idx] + JOINT_DIRECTION[idx]*np.rad2deg(rads[idx])
+                deg = max(JOINT_LIMIT_MIN[idx], min(JOINT_LIMIT_MAX[idx], deg))
+                deg_list.append(deg)
+            controller.set_goal_positions(deg_list)
+            print(f"[{t:.2f}s] joint_deg = {[round(d, 2) for d in deg_list]}")
+            # 정확한 시간 동기화
+            target_time = start + step*dt
+            now = time.time()
+            to_wait = target_time - now
+            if to_wait > 0:
+                time.sleep(to_wait)
 
+        print("목표 위치 도달!")
 
+    except Exception as e:
+        print(f"에러 발생: {e}")
     finally:
-        # Disable torque and close port
         controller.disable_torque(JOINT_IDS)
         controller.close()
-        print("Controller shutdown.")
-
-
+        print("Controller shutdown (finally block).")
