@@ -70,13 +70,13 @@ def DH_matrix(theta, d, a, alpha):
 
 def forward_kinematics(q):
     theta1, theta2, theta3, theta4 = q
-    A1 = DH_matrix(theta1, d1, 0, np.deg2rad(90))
-    A2 = DH_matrix(theta2+np.deg2rad(90), 0, a2, 0)
-    A3 = DH_matrix(theta3, 0, a3, 0)
-    A4 = DH_matrix(theta4, 0, a4, 0)
+    A1 = DH_matrix(-theta1, d1, 0, np.deg2rad(90))
+    A2 = DH_matrix(-theta2-np.deg2rad(90), 0, a2, 0)
+    A3 = DH_matrix(-theta3, 0, a3, 0)
+    A4 = DH_matrix(-theta4, 0, a4, 0)
     T04 = A1 @ A2 @ A3 @ A4
     pos = T04[0:3, 3]
-    roll = theta2 + theta3 + theta4
+    roll = -(theta2 + theta3 + theta4)
     return pos, roll
 
 def cubic_coeff(theta_i, theta_f, dtheta_i = 0.0, dtheta_f = 0.0, T = 2.0):
@@ -122,7 +122,6 @@ if __name__ == '__main__':
         for j in JOINT_IDS:
             controller.set_goal_position(j, 150.0)
         time.sleep(2.0)
-        # controller.set_goal_position(3, 150.0)
 
         q_current = []
         for j in JOINT_IDS:
@@ -144,9 +143,10 @@ if __name__ == '__main__':
         for t in t_steps:
             rads = [eval_cubic(c, t) for c in coeffs]
             for idx, j in enumerate(JOINT_IDS):
-                deg = 150.0 + np.rad2deg(rads[idx])
+                deg = 150.0 - np.rad2deg(rads[idx])
                 deg = max(0.0, min(300.0, deg))
                 controller.set_goal_position(j, deg)
+                print(f"joint {j} : {deg:.2f} , {deg_to_dxl(deg):.2f}")
             time.sleep(dt)
 
 
