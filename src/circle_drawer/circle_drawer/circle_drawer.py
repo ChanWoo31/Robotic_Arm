@@ -70,8 +70,8 @@ def DH_matrix(theta, d, a, alpha):
 
 def forward_kinematics(q):
     theta1, theta2, theta3, theta4 = q
-    A1 = DH_matrix(theta1, d1, 0, 0)
-    A2 = DH_matrix(theta2, 0, a2, 0)
+    A1 = DH_matrix(theta1, d1, 0, np.deg2rad(90))
+    A2 = DH_matrix(theta2+np.deg2rad(90), 0, a2, 0)
     A3 = DH_matrix(theta3, 0, a3, 0)
     A4 = DH_matrix(theta4, 0, a4, 0)
     T04 = A1 @ A2 @ A3 @ A4
@@ -124,26 +124,31 @@ if __name__ == '__main__':
         time.sleep(2.0)
         # controller.set_goal_position(3, 150.0)
 
+        q_current = []
+        for j in JOINT_IDS:
+            deg = controller.get_present_position(j)
+            q_current.append(np.deg2rad(deg - 150.0))
+
         # IK and FK
         x_d, y_d, z_d, roll_d = input("Enter desired position (x, y, z) and roll angle: ").split()
-        q_goal = inverse_kinematics(float(x_d), float(y_d), float(z_d), float(roll_d))
+        roll_d = np.deg2rad(float(roll_d))
+        q_goal = inverse_kinematics(float(x_d), float(y_d), float(z_d), roll_d)
 
         # coeff
         T = 4.0
         dt = 0.02
         t_steps = np.arange(0, T + dt/2, dt)
-        coeffs = [cubic_coeff(0, float(qg), 0,0,T) for qg in q_goal]
+        coeffs = [cubic_coeff(qc, float(qg), 0,0,T) for qc, qg in zip(q_current, q_goal)]
 
         # trajectory generation
         for t in t_steps:
             rads = [eval_cubic(c, t) for c in coeffs]
             for idx, j in enumerate(JOINT_IDS):
                 deg = 150.0 + np.rad2deg(rads[idx])
+                deg = max(0.0, min(300.0, deg))
                 controller.set_goal_position(j, deg)
             time.sleep(dt)
 
-        # degs = [eval_cubic(c, T) for c in coeffs]
-        # controller.set_goal_position(3, 150.0 + degs[0])
 
     finally:
         # Disable torque and close port
