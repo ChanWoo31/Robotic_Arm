@@ -66,7 +66,7 @@ def main():
     #     set_goal_position(port_handler, packet_handler, dxl_id, goal_position)
     #     time.sleep(0.05)
 
-    dxl_id = JOINT_IDS[2]  # 3 번째 모터 test
+    dxl_id = JOINT_IDS[1]  # 3 번째 모터 test
     enable_torque(port_handler, packet_handler, dxl_id)
     set_moving_speed(port_handler, packet_handler, dxl_id, moving_speed)
     set_goal_position(port_handler, packet_handler, dxl_id, deg_to_dxl(goal_position))
