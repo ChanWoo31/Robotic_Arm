@@ -11,7 +11,7 @@ JOINT_DIRECTION = [1, 1, 1, 1]
 JOINT_LIMIT_MIN = [0.0, 0.0, 0.0, 0.0]
 JOINT_LIMIT_MAX = [300.0, 300.0, 300.0, 300.0]
 
-DEVICENAME = '/dev/ttyUSB1'
+DEVICENAME = '/dev/ttyUSB0'
 BAUDRATE = 1000000
 PROTOCOL_VERSION = 1.0
 
@@ -87,7 +87,7 @@ def forward_kinematics(q):
     A4 = DH_matrix(-theta4, 0, a4, 0)
     T04 = A1 @ A2 @ A3 @ A4
     pos = T04[0:3, 3]
-    roll = (theta2 + theta3 + theta4)
+    roll = -(theta2 + theta3 + theta4) - np.pi/2
     return pos, roll
 
 def cubic_coeff(theta_i, theta_f, dtheta_i=0.0, dtheta_f=0.0, T=0.0):
@@ -117,13 +117,13 @@ def inverse_kinematics(x, y, z, roll, d1, a2, a3, a4):
     D = (r**2 + s**2 - a2**2 - a3**2) / (2 * a2 * a3)
     D = np.clip(D, -1.0, 1.0)  # 실수 허용범위
     
-    q3 = np.arctan2(np.sqrt(1 - D**2), D)  # elbow-up
+    q3 = np.arctan2(-np.sqrt(1 - D**2), D)  # elbow-up
     
     # 4. q2 (숄더)
-    q2 = np.arctan2(s, r) - np.arctan2(a3 * np.sin(q3), a2 + a3 * np.cos(q3))
+    q2 = np.arctan2(s, r) - np.arctan2(a3 * np.sin(q3), a2 + a3 * np.cos(q3)) - np.pi/2
     
     # 5. q4 (엔드이펙터 pitch)
-    q4 = roll - q2 - q3
+    q4 = roll - q2 - q3 + np.pi/2
     
     # DH 파라미터에 맞게 부호 및 오프셋 조정 필요할 수 있음
     return np.array([q1, q2, q3, q4])
