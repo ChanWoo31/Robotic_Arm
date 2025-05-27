@@ -3,19 +3,20 @@ import time
 from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
 
 # ————— 설정 —————
-DEVICENAME   = '/dev/ttyUSB0'   # Dynamixel USB 어댑터 포트
-BAUDRATE     = 1_000_000        # 1 Mbps
+DEVICENAME = '/dev/ttyUSB0'   # Dynamixel USB 어댑터 포트
+BAUDRATE = 1_000_000        # 1 Mbps
 PROTOCOL_VER = 1.0
 
-DXL_IDS      = [1, 2, 3]        # [베이스(yaw), 어깨(pitch), 팔꿈치(pitch)]
-ADDR_TORQUE  = 24               # Torque 제어 레지스터
+DXL_IDS = [1, 2, 3]        # [베이스(yaw), 어깨(pitch), 팔꿈치(pitch)]
+ADDR_TORQUE = 24               # Torque 제어 레지스터
 ADDR_GOAL_POS= 30               # Goal Position 레지스터
-TORQUE_ON    = 1
+TORQUE_ON = 1
 
 # — Robot 기하학 (m, ° 단위)
 L1       = 0.140  # 링크1 길이 (어깨→팔꿈치)
 L2       = 0.140  # 링크2 길이 (팔꿈치→툴센터)
 Z_OFFSET = 0.080  # 베이스에서 어깨 축 높이
+ZERO_OFFSET = 150.0
 
 # ————— 초기화 함수 —————
 def init_dxl():
@@ -32,11 +33,24 @@ def init_dxl():
 # ————— 각도 → raw 변환 —————
 def deg2raw(deg):
     """0°~300° → 0~1023"""
-    d = np.clip(deg, 0.0, 300.0)
-    return int(d / 300.0 * 1023)
+    phys_deg = deg + ZERO_OFFSET
+    phys_deg = np.clip(phys_deg, 0.0, 300.0)
+    return int(phys_deg / 300.0 * 1023)
 
-# ————— 역기구학 —————
-def ikine(x, y, z):
+def make_group(port, packet):
+    return GroupSyncWrite(port, packet, ADDR_GOAL_POS, 2)
+
+def sync_write(group, angles_deg):
+    group.clearParam()
+    for dxl_id, phys_deg in zip(DXL_IDS, angles_deg):
+        logical = phys_deg - ZERO_OFFSET
+        raw = deg2raw(logical)
+        lo, hi = raw & 0xFF, (raw >> 8) & 0xFF
+        group.addParam(dxl_id, bytearray([lo, hi]))
+    group.txPacket()
+
+# inverse
+def inverse_kinematic(x, y, z):
     """
     입력: x, y, z (m)
     출력: θ1(base yaw), θ2(shoulder pitch), θ3(elbow pitch) in degrees
@@ -58,21 +72,6 @@ def ikine(x, y, z):
 
     return theta1, theta2, theta3
 
-# ————— 동기 제어 준비 —————
-def make_group(port, packet):
-    return GroupSyncWrite(port, packet, ADDR_GOAL_POS, 2)
-
-def sync_write(group, angles_deg):
-    """
-    angles_deg: iterable of [θ1, θ2, θ3] in degrees
-    """
-    group.clearParam()
-    raws = [deg2raw(a) for a in angles_deg]
-    for dxl_id, raw in zip(DXL_IDS, raws):
-        lo, hi = raw & 0xFF, (raw >> 8) & 0xFF
-        group.addParam(dxl_id, bytearray([lo, hi]))
-    group.txPacket()
-
 # ————— 원 궤적 그리기 —————
 def draw_circle(group, cx, cy, cz, radius, steps=100, delay=0.05):
     """
@@ -83,7 +82,7 @@ def draw_circle(group, cx, cy, cz, radius, steps=100, delay=0.05):
     for deg in np.linspace(0, 360, steps+1):
         x = cx + radius * np.cos(np.deg2rad(deg))
         y = cy + radius * np.sin(np.deg2rad(deg))
-        θ1, θ2, θ3 = ikine(x, y, cz)
+        θ1, θ2, θ3 = inverse_kinematic(x, y, cz)
         sync_write(group, (θ1, θ2, θ3))
         time.sleep(delay)
 
@@ -94,7 +93,7 @@ if __name__ == "__main__":
 
     try:
         # 홈 자세: 완전 펼침 (0°, 0°, 0°)
-        sync_write(group, ikine(L1 + L2, 0, Z_OFFSET))
+        sync_write(group, inverse_kinematic(L1 + L2, 0, Z_OFFSET))
         time.sleep(1)
 
         # 예시: 중심(0.10, 0.00, Z_OFFSET), 반지름 0.05 m 원 그리기
