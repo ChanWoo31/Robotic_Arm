@@ -6,6 +6,7 @@ from ikpy.link import OriginLink, DHLink
 
 # ==== Parameters ====
 JOINT_IDS       = [1, 2, 3, 4]
+
 JOINT_ZERO_OFF  = [150.0, 150.0, 150.0, 150.0]
 JOINT_DIR       = [1, 1, 1, 1]
 JOINT_MIN       = [0.0, 0.0, 0.0, 0.0]

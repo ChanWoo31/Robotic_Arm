@@ -1,103 +1,201 @@
-import numpy as np
 import time
+import numpy as np
 from dynamixel_sdk import PortHandler, PacketHandler, GroupSyncWrite, COMM_SUCCESS
+import sys
+from ikpy.chain import Chain
+from ikpy.link import OriginLink, DHLink
 
-# ————— 설정 —————
-DEVICENAME = '/dev/ttyUSB0'   # Dynamixel USB 어댑터 포트
-BAUDRATE = 1_000_000        # 1 Mbps
-PROTOCOL_VER = 1.0
+JOINT_IDS = [1, 2, 3]
+JOINT_ZERO_OFFSET = [150.0, 150.0, 150.0]
+JOINT_DIRECTION = [1, 1, 1]
+JOINT_LIMIT_MIN = [0.0, 0.0, 0.0]
+JOINT_LIMIT_MAX = [300.0, 300.0, 300.0]
 
-DXL_IDS = [1, 2, 3]        # [베이스(yaw), 어깨(pitch), 팔꿈치(pitch)]
-ADDR_TORQUE = 24               # Torque 제어 레지스터
-ADDR_GOAL_POS= 30               # Goal Position 레지스터
-TORQUE_ON = 1
+DEVICENAME = '/dev/ttyUSB0'
+BAUDRATE = 1000000
+PROTOCOL_VERSION = 1.0
 
-# — Robot 기하학 (m, ° 단위)
-L1       = 0.140  # 링크1 길이 (어깨→팔꿈치)
-L2       = 0.140  # 링크2 길이 (팔꿈치→툴센터)
-Z_OFFSET = 0.080  # 베이스에서 어깨 축 높이
-ZERO_OFFSET = 150.0
+ADDR_TORQUE_ENABLE = 24
+ADDR_GOAL_POSITION = 30
+ADDR_PRESENT_POSITION = 36
 
-# ————— 초기화 함수 —————
-def init_dxl():
-    port = PortHandler(DEVICENAME)
-    packet = PacketHandler(PROTOCOL_VER)
-    if not port.openPort():    raise IOError("포트 열기 실패")
-    if not port.setBaudRate(BAUDRATE): raise IOError("Baudrate 설정 실패")
-    for dxl_id in DXL_IDS:
-        err, _ = packet.write1ByteTxRx(port, dxl_id, ADDR_TORQUE, TORQUE_ON)
-        if err != COMM_SUCCESS:
-            raise RuntimeError(f"ID {dxl_id} 토크 활성화 실패: {packet.getTxRxResult(err)}")
-    return port, packet
+TORQUE_ENABLE = 1
+TORQUE_DISABLE = 0
 
-# ————— 각도 → raw 변환 —————
-def deg2raw(deg):
-    """0°~300° → 0~1023"""
-    phys_deg = deg + ZERO_OFFSET
-    phys_deg = np.clip(phys_deg, 0.0, 300.0)
-    return int(phys_deg / 300.0 * 1023)
+d1, a2, a3, a4 = 0.135, 0.14, 0.14
 
-def make_group(port, packet):
-    return GroupSyncWrite(port, packet, ADDR_GOAL_POS, 2)
+def deg2dxl(deg: float) -> int:
+    deg = max(0.0, min(300.0, deg))
+    return int(deg / 300.0 * 1023)
 
-def sync_write(group, angles_deg):
-    group.clearParam()
-    for dxl_id, phys_deg in zip(DXL_IDS, angles_deg):
-        logical = phys_deg - ZERO_OFFSET
-        raw = deg2raw(logical)
-        lo, hi = raw & 0xFF, (raw >> 8) & 0xFF
-        group.addParam(dxl_id, bytearray([lo, hi]))
-    group.txPacket()
+def dxl2deg(val: int) -> float:
+    return val / 1023.0 * 300.0
 
-# inverse
-def inverse_kinematic(x, y, z):
-    """
-    입력: x, y, z (m)
-    출력: θ1(base yaw), θ2(shoulder pitch), θ3(elbow pitch) in degrees
-    """
-    theta1 = np.rad2deg(np.arctan2(y, x))
-    r      = np.hypot(x, y)
-    s      = z - Z_OFFSET
 
-    # Law of Cosines for θ3
-    D      = (r**2 + s**2 - L1**2 - L2**2) / (2 * L1 * L2)
-    D      = np.clip(D, -1.0, 1.0)
-    theta3 = np.rad2deg(np.arccos(D))
+class Controller:
+    def __init__(self, device=DEVICENAME, baud=BAUDRATE):
+        self.port = PortHandler(device)
+        if not self.port.openPort():
+            raise IOError(f"Fail")
+        if not self.port.setBaudRate(baud):
+            raise IOError(f"Fail")
+        self.packet = PacketHandler(PROTOCOL_VERSION)
+        self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 2)
 
-    # Shoulder θ2
-    alpha  = np.arctan2(s, r)
-    beta   = np.arctan2(L2 * np.sin(np.deg2rad(theta3)),
-                        L1 + L2 * np.cos(np.deg2rad(theta3)))
-    theta2 = np.rad2deg(alpha - beta)
+    def enable_torque(self, ids):
+        for dxl_id in ids:
+            self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
 
-    return theta1, theta2, theta3
+    def disable_torque(self, ids):
+        for dxl_id in ids:
+            self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
 
-# ————— 원 궤적 그리기 —————
-def draw_circle(group, cx, cy, cz, radius, steps=100, delay=0.05):
-    """
-    cx, cy, cz, radius in meters
-    steps: 분할 개수
-    delay: 각 스텝 간 대기 시간 (s)
-    """
-    for deg in np.linspace(0, 360, steps+1):
-        x = cx + radius * np.cos(np.deg2rad(deg))
-        y = cy + radius * np.sin(np.deg2rad(deg))
-        θ1, θ2, θ3 = inverse_kinematic(x, y, cz)
-        sync_write(group, (θ1, θ2, θ3))
-        time.sleep(delay)
+    def set_goal_positions(self, deg_list):
+        self.sync_write.clearParam()
+        for idx, dxl_id in enumerate(JOINT_IDS):
+            pos = deg2dxl(deg_list[idx])
+            param = [pos & 0xFF, (pos >> 8) & 0xFF]
+            self.sync_write.addParam(dxl_id, bytes(param))
+        result = self.sync_write.txPacket()
+        if result != COMM_SUCCESS:
+            raise RuntimeError("SyncWrite 통신 오류")
+        
+    def get_present_position(self, dxl_id):
+        val, comm_result, error = self.packet.read2ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
+        if comm_result != COMM_SUCCESS:
+            raise RuntimeError(f"Dynamixel 통신 오류 (ID={dxl_id})")
+        if error != 0:
+            raise RuntimeError(f"Dynamixel 에러 (ID={dxl_id}, error={error})")
+        return dxl2deg(val)
+    
+    def close(self):
+        self.port.closePort()
 
-# ————— 메인 실행부 —————
-if __name__ == "__main__":
-    port, packet = init_dxl()
-    group = make_group(port, packet)
+def DH_matrix(theta, d, a, alpha):
+    return np.array([
+        [np.cos(theta), -np.sin(theta) * np.cos(alpha), np.sin(theta) * np.sin(alpha), a * np.cos(theta)],
+        [np.sin(theta), np.cos(theta) * np.cos(alpha), -np.cos(theta) * np.sin(alpha), a * np.sin(theta)],
+        [0, np.sin(alpha), np.cos(alpha), d],
+        [0, 0, 0, 1]
+    ])
 
+def forward_kinematics(q):
+    theta1, theta2, theta3 = q
+    A1 = DH_matrix(theta1, d1, 0, np.deg2rad(90))
+    A2 = DH_matrix(theta2+np.deg2rad(90), 0, a2, np.deg2rad(180))
+    A3 = DH_matrix(theta3+np.deg2rad(90), 0, a3, np.deg2rad(90))
+    T03 = A1 @ A2 @ A3
+    pos = T03[0:3, 3]
+    return pos
+
+def cubic_coeff(theta_i, theta_f, dtheta_i=0.0, dtheta_f=0.0, T=0.0):
+    a0 = theta_i
+    a1 = dtheta_i
+    a2 = (3 * (theta_f - theta_i) - (2 * dtheta_i + dtheta_f) * T) / (T ** 2)
+    a3 = (2 * (theta_i - theta_f) + (dtheta_i + dtheta_f) * T) / (T ** 3)
+    return a0, a1, a2, a3
+
+def eval_cubic(coeffs, t):
+    a0, a1, a2, a3 = coeffs
+    return a0 + a1 * t + a2 * t ** 2 + a3 * t ** 3
+
+def inverse_kinematics(x, y, z, roll, d1, a2, a3):
+    # 1. q1 (베이스 회전)
+    q1 = np.arctan2(y, x)
+    
+    # 2. Wrist 중심 좌표
+    x_w = x - a4 * np.cos(roll) * np.cos(q1)
+    y_w = y - a4 * np.cos(roll) * np.sin(q1)
+    z_w = z - a4 * np.sin(roll)
+    
+    r = np.hypot(x_w, y_w)
+    s = z_w - d1
+    
+    # 3. q3 (엘보)
+    D = (r**2 + s**2 - a2**2 - a3**2) / (2 * a2 * a3)
+    D = np.clip(D, -1.0, 1.0)  # 실수 허용범위
+    
+    q3 = np.arctan2(-np.sqrt(1 - D**2), D)  # elbow-up
+    
+    # 4. q2 (숄더)
+    q2 = np.arctan2(s, r) - np.arctan2(a3 * np.sin(q3), a2 + a3 * np.cos(q3)) - np.pi/2
+    
+    # 5. q4 (엔드이펙터 pitch)
+    q4 = roll - q2 - q3 + np.pi/2
+    
+    # DH 파라미터에 맞게 부호 및 오프셋 조정 필요할 수 있음
+    return np.array([q1, q2, q3])
+
+if __name__ == '__main__':
+    global controller
+    controller = Controller()
     try:
-        # 홈 자세: 완전 펼침 (0°, 0°, 0°)
-        sync_write(group, inverse_kinematic(L1 + L2, 0, Z_OFFSET))
-        time.sleep(1)
+        controller.enable_torque(JOINT_IDS)
+        time.sleep(0.1)
 
-        # 예시: 중심(0.10, 0.00, Z_OFFSET), 반지름 0.05 m 원 그리기
-        draw_circle(group, cx=0.10, cy=0.00, cz=Z_OFFSET, radius=0.05,
-                    steps=120, delay=0.03)
+        controller.set_goal_positions(JOINT_ZERO_OFFSET)
+        time.sleep(2.0)
+
+        q_current = []
+        for idx, j in enumerate(JOINT_IDS):
+            deg = controller.get_present_position(j)
+            q_cur = JOINT_DIRECTION[idx] * np.deg2rad(deg - JOINT_ZERO_OFFSET[idx])
+            q_current.append(q_cur)
+        q_current = np.array(q_current)
+
+        # (단위: m, deg)
+        while True:
+            try:
+                vals = input("목표 위치 입력 (x[m], y[m], z[m], roll[deg]) : ").split()
+                if len(vals) != 4:
+                    print("4개 값(x y z roll)을 입력하세요.")
+                    continue
+                x_d, y_d, z_d, roll_d = map(float, vals)
+                roll_d = np.deg2rad(roll_d)
+                break
+            except Exception as e:
+                print("error")
+
+        # 목표 조인트각 (rad)
+        q_goal = inverse_kinematics(x_d, y_d, z_d, roll_d, d1, a2, a3, a4)
+
+        # 트레젝토리 설정
+        T = 6.0
+        dt = 0.02
+        t_steps = np.arange(0, T + dt/2, dt)
+        coeffs = [cubic_coeff(qc, qg, 0, 0, T) for qc, qg in zip(q_current, q_goal)]
+
+        print("trajectory")
+        start = time.time()
+        for step, t in enumerate(t_steps):
+            rads = [eval_cubic(c, t) for c in coeffs]
+            deg_list = []
+            for idx in range(4):
+                deg = JOINT_ZERO_OFFSET[idx] + JOINT_DIRECTION[idx]*np.rad2deg(rads[idx])
+                deg = max(JOINT_LIMIT_MIN[idx], min(JOINT_LIMIT_MAX[idx], deg))
+                deg_list.append(deg)
+            controller.set_goal_positions(deg_list)
+
+            # FK 입력 각도는, deg_list(모터각)을 다시 내부 수학 각도로 환산
+            FK_input_rads = [
+                JOINT_DIRECTION[i] * np.deg2rad(deg_list[i] - JOINT_ZERO_OFFSET[i])
+                for i in range(4)
+            ]
+            pos, roll = forward_kinematics(FK_input_rads)
+            print(f"[{t:.2f}s] joint_deg = {[round(d,2) for d in deg_list]}, EE = {np.round(pos,4)}, roll(deg) = {round(np.rad2deg(roll),2)}")
+            # print(f"[{t:.2f}s] joint_deg = {[round(d, 2) for d in deg_list]}")
+            # 정확한 시간 동기화
+            target_time = start + step*dt
+            now = time.time()
+            to_wait = target_time - now
+            if to_wait > 0:
+                time.sleep(to_wait)
+
+        print("목표 위치 도달!")
+
+    except Exception as e:
+        print(f"에러 발생: {e}")
     finally:
-        port.closePort()
+        controller.disable_torque(JOINT_IDS)
+        controller.close()
+        print("Controller shutdown")
