@@ -48,17 +48,11 @@ robot_chain = Chain(name='3dof_dxl', links = [
     #link 1
     DHLink(d=d1, a=0.0, alpha=np.deg2rad(90), offset=np.deg2rad(offset_degree[0])),
     #link2: theta2 + 90 + offset2
-    DHLink(d=0.0, a=a2, alpha = np.deg2rad(180), offset=offset_degree[1]),
+    DHLink(d=0.0, a=a2, alpha = np.deg2rad(180), offset=np.deg2rad(offset_degree[1])),
     #link3: theta3 + 90 + offset3
-    DHLink(d=0.0, a=a3, alpha=np.deg2rad(90), offset=offset_degree[2]),
+    DHLink(d=0.0, a=a3, alpha=np.deg2rad(90), offset=np.deg2rad(offset_degree[2])),
            
 ])
-
-
-
-# print("IK 결과 (deg): ", np.rad2deg(joint_thetas))
-
-
 
 # ==== Controller class ====
 class Controller:
@@ -67,15 +61,15 @@ class Controller:
         if not self.port.openPort(): raise IOError("Port open fail")
         if not self.port.setBaudRate(baud): raise IOError("Set baudrate fail")
         self.packet = PacketHandler(PROTOCOL_VERSION)
-        self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POS, 2)
+        self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 2)
 
     def enable_torque(self, ids):
         for j in ids:
-            self.packet.write1ByteTxRx(self.port, j, ADDR_TORQUE, TORQUE_ON)
+            self.packet.write1ByteTxRx(self.port, j, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
 
     def disable_torque(self, ids):
         for j in ids:
-            self.packet.write1ByteTxRx(self.port, j, ADDR_TORQUE, TORQUE_OFF)
+            self.packet.write1ByteTxRx(self.port, j, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
 
     def set_positions(self, deg_list):
         self.sync_write.clearParam()
@@ -88,7 +82,7 @@ class Controller:
             raise RuntimeError("SyncWrite error")
 
     def get_position(self, j):
-        val, comm, err = self.packet.read2ByteTxRx(self.port, j, ADDR_PRESENT_POS)
+        val, comm, err = self.packet.read2ByteTxRx(self.port, j, ADDR_PRESENT_POSITION)
         if comm != COMM_SUCCESS or err != 0:
             raise RuntimeError(f"Dxl error ID{j}")
         return dxl2deg(val)
