@@ -228,7 +228,205 @@ if __name__ == "__main__":
     target_pos = np.array([x, y, z])
 
     # eclipse_a = 50
-    # eclipse_b = 30
+    # eclipse_b = 30import numpy as np
+from numpy import sin, cos, arctan2, radians, degrees
+import matplotlib.pyplot as plt
+from dynamixel_sdk import PortHandler, PacketHandler, COMM_SUCCESS, GroupSyncWrite
+import time
+
+d = [0, 0, 0]
+a = [0, 140, 140]
+alpha_ = [90, -180, 90]
+
+T0 = np.array([
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 105.5],
+    [0, 0, 0, 1]
+])
+
+past_theta = [0,0,0]
+past_dxl_val = [0,0,0]
+DEVICENAME        = '/dev/ttyUSB0'
+# DEVICENAME        = 'COM6'
+BAUDRATE          = 1000000
+PROTOCOL_VERSION  = 1
+
+
+ADDR_TORQUE_ENABLE    = 24
+ADDR_GOAL_POSITION    = 30        # 2 byte
+ADDR_MOVING_SPEED     = 32        # 2 byte
+ADDR_PRESENT_POSITION = 36        # 2 byte
+ADDR_PRESENT_SPEED    = 38        # 2 byte
+
+
+CW_Angle_Limit = 6        
+CCW_Angle_Limit    = 8        
+Moving_Speed = 32
+
+TORQUE_ENABLE   = 1
+TORQUE_DISABLE  = 0
+
+ADDR_MX_TORQUE_LIMIT = 34
+TORQUE_LIMIT = 1023
+
+# Joint IDs
+JOINT_IDS = [1, 2, 3]
+
+def dxl_to_deg(val: int) -> float:
+    return val / 1023.0 * 300.0
+
+class DXLController:
+    def __init__(self, device=DEVICENAME, baud=BAUDRATE):
+        # Port & packet
+        self.port = PortHandler(device)
+        if not self.port.openPort():
+            raise IOError(f"Failed to open port {device}")
+        if not self.port.setBaudRate(baud):
+            raise IOError(f"Failed to set baudrate {baud}")
+        self.packet = PacketHandler(PROTOCOL_VERSION)
+        self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 2)
+        
+        for i in range(4):
+            self.packet.write2ByteTxRx(self.port, i+1, ADDR_MX_TORQUE_LIMIT, TORQUE_LIMIT)
+
+    def CW_Limit(self, dxl_id, dx_val):
+        self.packet.write2ByteTxRx(self.port, dxl_id, CW_Angle_Limit, dx_val)
+
+    def CCW_Limit(self, dxl_id, dx_val):
+        self.packet.write2ByteTxRx(self.port, dxl_id, CCW_Angle_Limit, dx_val)
+
+    def motor_speed(self, dxl_id, speed_val):
+        self.packet.write2ByteTxRx(self.port, dxl_id, Moving_Speed, speed_val)
+
+    def enable_torque(self, dxl_id):
+        self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
+
+    def disable_torque(self, dxl_id):
+        self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
+
+    def set_goal_position(self, dxl_val):
+        self.sync_write.clearParam()
+        for idx, dxl_id in enumerate(JOINT_IDS):
+            pos = int(dxl_val[idx])
+            param = [pos & 0xFF, (pos >> 8) & 0xFF]
+            self.sync_write.addParam(dxl_id, bytes(param))
+        result = self.sync_write.txPacket()
+        if result != COMM_SUCCESS:
+            raise RuntimeError("SyncWrite 통신 오류")
+
+    def get_present_position(self, dxl_id):
+        val, _, _ = self.packet.read2ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
+        return val
+
+    def close(self):
+        self.port.closePort()
+        
+def dh_transform(theta, d_, a_, alpha):
+    theta_rad = radians(theta)
+    alpha_rad = radians(alpha)
+    return np.array([
+        [cos(theta_rad), -sin(theta_rad)*cos(alpha_rad),  sin(theta_rad)*sin(alpha_rad), a_*cos(theta_rad)],
+        [sin(theta_rad),  cos(theta_rad)*cos(alpha_rad), -cos(theta_rad)*sin(alpha_rad), a_*sin(theta_rad)],
+        [0,               sin(alpha_rad),                cos(alpha_rad),               d_],
+        [0,               0,                            0,                           1]
+    ])
+
+def get_a_end(theta2_deg, theta3_deg):
+    theta4_deg = -(theta2_deg + theta3_deg)
+    return dh_transform(theta4_deg, 0, 0, 0)
+
+def forward_kinematics(thetas):
+    theta1, theta2, theta3 = thetas
+    A1 = dh_transform(theta1, d[0], a[0], alpha_[0])
+    A2 = dh_transform(theta2+90, d[1], a[1], alpha_[1])
+    A3 = dh_transform(theta3+90, d[2], a[2], alpha_[2])
+    A_end = get_a_end(theta2, theta3)
+    T = T0 @ A1 @ A2 @ A3 @ A_end
+    return T, [A1, A2, A3, A_end]
+
+# — 여기에 analytic IK 함수 추가 —
+def inverse_kinematics_analytic(x, y, z, d1=105.5, a2=140, a3=140):
+    theta1 = np.degrees(np.arctan2(y, x))
+    r = np.hypot(x, y)
+    s = z - d1
+    D = (r*r + s*s - a2*a2 - a3*a3) / (2*a2*a3)
+    if abs(D) > 1.0:
+        return None
+    theta3 = np.degrees(np.arctan2(np.sqrt(1 - D*D), D))
+    theta2 = np.degrees(
+        np.arctan2(s, r)
+        - np.arctan2(a3*np.sin(np.radians(theta3)), a2 + a3*np.cos(np.radians(theta3)))
+    )
+    # DH 파라미터 사용 시 offset 보정(코드 상 +90° 적용 부분과 맞추기)
+    return [theta1, theta2 - 90, theta3 - 90]
+
+# — 여기에 완료 동기화 함수 추가 —
+def move_until_reached(controller, target_ticks, speed, tol=2):
+    # 속도 설정
+    for jid, sp in zip(JOINT_IDS, speed):
+        controller.enable_torque(jid)
+        controller.motor_speed(jid, sp)
+    # 목표 위치 전송
+    controller.set_goal_position(target_ticks)
+    # 완료 대기
+    while True:
+        presents = np.array([controller.get_present_position(j) for j in JOINT_IDS])
+        if np.all(np.abs(presents - target_ticks) <= tol):
+            break
+        time.sleep(0.005)
+
+def deg2dxl_theta(theta_deg):
+    theta_deg = np.array(theta_deg)
+    motor_val = (theta_deg * (1023 / 300)).astype(int)
+    motor_val = 512 + motor_val
+    return motor_val
+
+if __name__ == "__main__":
+    Dxl = DXLController()
+    Speed = [50,50,50]
+    for i in range(len(Speed)):
+        Dxl.enable_torque(1+i)
+        Dxl.motor_speed(1+i, Speed[i])
+    
+    init_pos = [512,291,700]
+    Dxl.set_goal_position(init_pos)
+    print("이동 중")
+    time.sleep(5)
+
+    print("\n 목표 위치와 반지름을 입력 (X,Y,Z,R 단위 : mm)")
+    target_str = input("목표 위치: ")
+    x, y, z, r = map(float, target_str.strip().split(","))
+    point_num = 72
+    angles = np.linspace(0, 2 * np.pi, point_num, endpoint=False)
+    current_guess = [0, 0, 0]
+    dt = 0.05 
+    prev_ticks = init_pos
+
+    # — 메인 루프를 analytic IK + 완료 동기화로 교체 —
+    for theta in angles:
+        tx = x + r * np.cos(theta)
+        ty = y + r * np.sin(theta)
+        tz = z
+
+        sol = inverse_kinematics_analytic(tx, ty, tz)
+        if sol is None:
+            print("도달 불가:", tx, ty, tz)
+            continue
+
+        next_ticks = deg2dxl_theta(sol)
+        deltas = np.abs(next_ticks - prev_ticks)
+        max_delta = deltas.max() or 1
+        speeds = (deltas / max_delta * np.array(Speed)).astype(int)
+
+        move_until_reached(Dxl, next_ticks, speeds)
+        prev_ticks = next_ticks
+
+    home_ticks = deg2dxl_theta([0, 0, 0])
+    Dxl.set_goal_position(home_ticks)
+    time.sleep(1)
+    Dxl.close()
+
 
     point_num = 72
     angles = np.linspace(0, 2 * np.pi, point_num, endpoint=False)
@@ -270,77 +468,4 @@ if __name__ == "__main__":
     time.sleep(1)
     Dxl.close()
 
-    # circle_points = np.array(circle_points).astype(int)
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-
-    # # 점 그리기
-    # ax.plot(circle_points[:, 0], circle_points[:, 1], circle_points[:, 2], 'o-', label='Circle in 3D')
-    # ax.set_xlabel('X')
-    # ax.set_ylabel('Y')
-    # ax.set_zlabel('Z')
-    # ax.set_title('3D Circle')
-    # ax.legend()
-    # plt.show()
-    # thetas = [0, 0, 0]
-    # for j, point in enumerate(circle_points):
-    #     thetas, success = inverse_kinematics_numeric(point, initial_guess=thetas)
-    #     print("\n결과:")
-
-    #     thetas = theta_condition(thetas)
-    #     print("θ1: {:.2f}°\nθ2: {:.2f}°\nθ3: {:.2f}°".format(*thetas))
-
-    #     dxl_val = deg2dxl_theta(thetas)
-    #     print("motor1: {:.2f} motor2: {:.2f} motor1: {:.2f}".format(*dxl_val))
-
-    #     T_final, A_matrices = forward_kinematics(thetas)
-    #     end_effector_pos = T_final[:3, 3]
-
-    #     # plot_arm(A_matrices, target_pos=circle_points[j], title="그래프")
-
-        
-    #     print("\n엔드이펙터 위치:", end_effector_pos)
-    #     print("목표 위치:", circle_points[j])
-
-    #     error = np.linalg.norm(end_effector_pos - circle_points[j])
-    #     print("위치 오차 (유클리드 거리): {:.3f} mm".format(error))
-
-    #     if success == False: # 130이상 
-    #         print("오류")
-    #         # plot_arm(A_matrices, target_pos=circle_points[j], title="그래프")
-    #         pass
-    #         # thetas = past_theta
-
-    #     # if np.abs((dxl_val[2]-512) * (dxl_val[1]-512)) < 0 and np.abs((dxl_val[2]) * (dxl_val[1])) < 50:
-    #     #     print("충돌 위험")
-    #     #     dxl_val = past_dxl_val
-
-    #     # plot_arm(A_matrices, target_pos=target_pos, title="그래프")
-    #     else:
-    #         Speed = [300,300,300]
-
-    #         for i in range(len(Speed)):
-    #             Dxl.enable_torque(1+i)
-    #             Dxl.motor_speed(1+i,Speed[i])
-
-    #         go2_pos = dxl_val
-    #         Dxl.set_goal_position(go2_pos)
-    #         for i in range(len(go2_pos)):
-    #             print("이동중_원 위치")
-    #             print(Dxl.get_present_position(1+i))
-    #             print("목표1: {:.2f} 목표2: {:.2f} 목표3: {:.2f}".format(*go2_pos))
-    #             print("현재1: {:.2f} 현재2: {:.2f} 현재3: {:.2f}".format(*[Dxl.get_present_position(1),Dxl.get_present_position(2),Dxl.get_present_position(3)]))
-                
-
-            
-    # time.sleep(1)
-    # Speed = [50,50,50]
-
-    # for i in range(len(Speed)):
-    #     Dxl.enable_torque(1+i)
-    #     Dxl.motor_speed(1+i,Speed[i])
-    
-    #     init_pos = deg2dxl_array([0,0,0])
-    #     Dxl.set_goal_position(init_pos)
-
+   
