@@ -20,28 +20,30 @@ past_dxl_val = [0,0,0]
 DEVICENAME        = '/dev/ttyUSB0'
 # DEVICENAME        = 'COM6'
 BAUDRATE          = 1000000
-PROTOCOL_VERSION  = 1
+PROTOCOL_VERSION  = 2.0
 
 
-ADDR_TORQUE_ENABLE    = 24
-ADDR_GOAL_POSITION    = 30        # 2 byte
-ADDR_MOVING_SPEED     = 32        # 2 byte
-ADDR_PRESENT_POSITION = 36        # 2 byte
-ADDR_PRESENT_SPEED    = 38        # 2 byte
+ADDR_TORQUE_ENABLE    = 64
+ADDR_GOAL_POSITION    = 116        # 2 byte
+ADDR_MOVING_SPEED     = 112        # 2 byte
+ADDR_PRESENT_POSITION = 132        # 2 byte
+ADDR_PRESENT_SPEED    = 128        # 2 byte
 
 
-CW_Angle_Limit = 6        
-CCW_Angle_Limit    = 8        
+CW_Angle_Limit = 48      
+CCW_Angle_Limit    = 52      
 Moving_Speed = 32
 
 TORQUE_ENABLE   = 1
 TORQUE_DISABLE  = 0
 
-ADDR_MX_TORQUE_LIMIT = 34
+ADDR_MX_TORQUE_LIMIT = 38
 TORQUE_LIMIT = 1023
 
 # Joint IDs
 JOINT_IDS = [1, 2, 3]
+
+connect_pass = False
 
 # Convert radians to Dynamixel position units
 # def deg_to_dxl(deg: float) -> int:
@@ -49,22 +51,25 @@ JOINT_IDS = [1, 2, 3]
 #     return int(deg / 300.0 * 1023)
 
 def dxl_to_deg(val: int) -> float:
-    return val / 1023.0 * 300.0
+    return val / 4096.0 * 360.0
 
 class DXLController:
     def __init__(self, device=DEVICENAME, baud=BAUDRATE):
         # Port & packet
-        self.port = PortHandler(device)
-        if not self.port.openPort():
-            raise IOError(f"Failed to open port {device}")
-        if not self.port.setBaudRate(baud):
-            raise IOError(f"Failed to set baudrate {baud}")
-        self.packet = PacketHandler(PROTOCOL_VERSION)
-        self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 2)
-        
-        for i in range(4):
-            self.packet.write2ByteTxRx(self.port, i+1, ADDR_MX_TORQUE_LIMIT, TORQUE_LIMIT)
+        if connect_pass == False:
+            self.port = PortHandler(device)
+            if not self.port.openPort():
+                raise IOError(f"Failed to open port {device}")
+            if not self.port.setBaudRate(baud):
+                raise IOError(f"Failed to set baudrate {baud}")
+            self.packet = PacketHandler(PROTOCOL_VERSION)
+            self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 4)
+            
+            for i in range(4):
+                self.packet.write2ByteTxRx(self.port, i+1, ADDR_MX_TORQUE_LIMIT, TORQUE_LIMIT)
 
+        else:
+            pass
 
     def CW_Limit(self, dxl_id, dx_val):
         self.packet.write2ByteTxRx(self.port, dxl_id, CW_Angle_Limit, dx_val)
@@ -72,11 +77,13 @@ class DXLController:
     def CCW_Limit(self, dxl_id, dx_val):
         self.packet.write2ByteTxRx(self.port, dxl_id, CCW_Angle_Limit, dx_val)
 
-    def motor_speed(self, dxl_id, speed_val):
-        self.packet.write2ByteTxRx(self.port, dxl_id, Moving_Speed, speed_val)
+    def motor_speed(self, dxl_id, speed_val): # Moving_Speed -> ADDR_MOVING_SPEED 
+        self.packet.write4ByteTxRx(self.port, dxl_id, ADDR_MOVING_SPEED, speed_val)
+        pass
 
     def enable_torque(self, dxl_id):
         self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
+        pass
 
     def disable_torque(self, dxl_id):
         self.packet.write1ByteTxRx(self.port, dxl_id, ADDR_TORQUE_ENABLE, TORQUE_DISABLE)
@@ -86,21 +93,22 @@ class DXLController:
         for idx, dxl_id in enumerate(JOINT_IDS):
             # print(int(dxl_val[idx]))
             pos = int(dxl_val[idx])  # 각 모터 목표 위치 값, int로 변환            
-            param = [pos & 0xFF, (pos >> 8) & 0xFF]
+            param = [pos & 0xFF, (pos >> 8) & 0xFF,
+                     (pos >> 16) & 0xFF, (pos >> 24) & 0xFF]
             self.sync_write.addParam(dxl_id, bytes(param))
         result = self.sync_write.txPacket()
         if result != COMM_SUCCESS:
             raise RuntimeError("SyncWrite 통신 오류")
-        if result != COMM_SUCCESS:
-            raise RuntimeError("SyncWrite 통신 오류")
+        pass
 
     def get_present_position(self, dxl_id):
-        val, _, _ = self.packet.read2ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
+        val, _, _ = self.packet.read4ByteTxRx(self.port, dxl_id, ADDR_PRESENT_POSITION)
         return val
+        pass
 
     def close(self):
         self.port.closePort()
-        
+
 def dh_transform(theta, d_, a_, alpha):
     theta_rad = radians(theta)
     alpha_rad = radians(alpha)
@@ -176,22 +184,23 @@ def plot_arm(A_matrices, target_pos=None, title="3D 로봇팔 시각화"):
 def deg2dxl_theta(theta_deg): #DH파라미터 전용
     theta_deg = np.array(theta_deg)  # 배열로 변환    
     theta_link = theta_deg
-    theta_link[2] = theta_link[2] - theta_link[1]
-    motor_val = (theta_deg * (1023 / 300)).astype(int)
+    theta_link[2] = theta_link[2] - theta_link[1] 
+    motor_val = (theta_deg * (4096 / 360)).astype(int)
+    # motor_val[2] = motor_val[2] - motor_val[1]
     
-    motor_val = 512 + motor_val
+    motor_val = 2048 + motor_val
     return motor_val
 
 def deg2dxl_array(theta_deg): #일반 배열 전용
     theta_deg = np.array(theta_deg)  # 배열로 변환
     theta_deg = theta_deg 
-    motor_val = (theta_deg * (1023 / 300)).astype(int)
-    motor_val = 512 + motor_val
+    motor_val = (theta_deg * (4096 / 360)).astype(int)
+    motor_val = 2048 + motor_val
     return motor_val
 
 def deg2dxl(theta_deg): #숫자 전용
-    motor_val = int(theta_deg * (1023 / 300))
-    motor_val = 512 + motor_val
+    motor_val = int(theta_deg * (4096 / 360))
+    motor_val = 2048 + motor_val
     return motor_val
 
 def theta_condition(thetas):
@@ -209,7 +218,8 @@ if __name__ == "__main__":
         Dxl.enable_torque(1+i)
         Dxl.motor_speed(1+i,Speed[i])
     
-    init_pos = deg2dxl_array([0,0,0])
+    # init_pos = deg2dxl_array([0,0,0])
+    init_pos = [2048,1400,2048]
     Dxl.set_goal_position(init_pos)
 
     print("이동 중")
