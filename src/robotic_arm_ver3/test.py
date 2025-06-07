@@ -22,21 +22,21 @@ TORQUE_DISABLE = 0
 def deg2dxl(deg: float) -> int:
     ang = ((deg + 180) % 360) - 180
     ratio = (ang + 180) / 360
-    raw = int(ratio * 4095)
-    return max(0, min(4095, raw))
+    raw = int(ratio * 4096)
+    return max(0, min(4096, raw))
 
 def dxl2deg(raw: int) -> float:
-    return raw / 4095 * 360 - 180
+    return raw / 4096 * 360 - 180
 
 robot_chain = Chain(name='4dof_dxl', links=[
     OriginLink(),
-    DHLink(d=d1, a=0, alpha=np.deg2rad(90), offset=0),
+    DHLink(d=d1, a=0, alpha=np.deg2rad(90), theta=0),
 
-    DHLink(d=0, a=a2, alpha=0, offset=np.deg2rad(90)),
+    DHLink(d=0, a=a2, alpha=0, theta=np.deg2rad(90)),
 
-    DHLink(d=0, a=a3, alpha=0, offset=0),
+    DHLink(d=0, a=a3, alpha=0, theta=0),
 
-    DHLink(d=0, a=a4, alpha=0, offset=0),
+    DHLink(d=0, a=a4, alpha=0, theta=0),
 
 ])
 
@@ -89,7 +89,7 @@ def move_to(x, y, z, speed=50):
     T_current = robot_chain.forward_kinematics(current_rad)
     p_current = T_current[:3, 3]
 
-    ik_full = robot_chain.inverse_kinematics([x, y, z, 1])
+    ik_full = robot_chain.inverse_kinematics([x, y, z])
     target_rad = ik_full[1:len(JOINT_IDS) + 1]
     target_deg = [np.rad2deg(ang) for ang in target_rad]
 
@@ -108,7 +108,7 @@ def circle_drawer(x, y, z, r, steps=100, speed=50):
         py = y + r * np.sin(theta)
         pz = z
         
-        ik_results = robot_chain.inverse_kinematics([px, py, pz, 1])
+        ik_results = robot_chain.inverse_kinematics([px, py, pz])
 
         degs = [np.rad2deg(ang) for ang in ik_results[1:len(JOINT_IDS) + 1]]
 
