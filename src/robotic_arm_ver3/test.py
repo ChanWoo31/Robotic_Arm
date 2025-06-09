@@ -4,8 +4,8 @@ import time
 from ikpy.link import OriginLink, DHLink
 from ikpy.chain import Chain
 
-d1 = 110.0
-a2, a3, a4 = 140.0, 140.0, 80.0
+d1 = 112.25
+a2, a3, a4 = 140.0, 140.0, 63.5
 
 JOINT_IDS = [1, 2, 3, 4]
 DEVICENAME = '/dev/ttyUSB0'

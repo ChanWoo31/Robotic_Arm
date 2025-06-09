@@ -5,8 +5,8 @@ from ikpy.link import OriginLink, DHLink
 from ikpy.chain import Chain
 
 # ─── 1) 4-DOF DH 체인 정의 ─────────────────────────────────────
-d1 = 110.0
-a2, a3, a4 = 140.0, 140.0, 80.0
+d1 = 112.25
+a2, a3, a4 = 140.0, 140.0, 63.5
 
 robot_chain = Chain(name='4dof_pen_mount', links=[
     OriginLink(),
@@ -21,7 +21,7 @@ robot_chain = Chain(name='4dof_pen_mount', links=[
 ])
 
 # ─── 2) 원 궤적 파라미터 ───────────────────────────────────────
-x0, y0, z0, r0 = 160, 0, 100, 50   # 원의 중심 (mm) & 반지름
+x0, y0, z0, r0 = 160, 0, 100, 0   # 원의 중심 (mm) & 반지름
 steps = 100                        # 분할 개수
 
 # ─── 3) IK → FK → 프레임별 링크 위치 저장 ────────────────────
