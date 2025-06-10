@@ -21,6 +21,10 @@ ADDR_MX_TORQUE_LIMIT = 38
 TORQUE_ENABLE = 1
 TORQUE_DISABLE = 0
 
+GRIPPER_ID = 5
+GRIPPER_OPEN_POSITION = 0
+GRIPPER_CLOSE_POSITION = 90
+
 def deg2dxl(deg: float) -> int:
     ang = ((deg + 180) % 360) - 180
     ratio = (ang + 180) / 360
@@ -85,6 +89,7 @@ class DXLController:
     def close(self):
         self.port.closePort()
 
+
 def move_to(x, y, z, speed=50):
     current_deg = [dxl.get_position(j) for j in JOINT_IDS]
     current_rad = [0.0] + [np.deg2rad(d) for d in current_deg]
@@ -104,34 +109,6 @@ def move_to(x, y, z, speed=50):
     dist=np.linalg.norm(np.array([x, y, z]) - p_current)
     time.sleep(dist/speed)
 
-def circle_drawer(x, y, z, r, steps=100, speed=50):
-    arc_len = 2 * np.pi * r / steps
-    dt = arc_len / speed
-
-    for i in range(steps):
-        theta = 2 * np.pi * i / steps
-        px = x + r * np.cos(theta)
-        py = y + r * np.sin(theta)
-        pz = z
-        
-        ik_results = robot_chain.inverse_kinematics(
-            target_position=[px, py, pz],
-            orientation_mode='Y',
-            target_orientation=[0, 0, 1]  # Z축과 정렬
-        )
-
-        degs = [np.rad2deg(ang) for ang in ik_results[1:len(JOINT_IDS) + 1]]
-
-        dxl.set_positions(degs)
-        time.sleep(dt)
-
-    px = x + r * np.cos(0)
-    py = y + r * np.sin(0)
-    pz = z
-
-    ik_results = robot_chain.inverse_kinematics([px, py, pz])
-    degs = [np.rad2deg(ang) for ang in ik_results[1:len(JOINT_IDS) + 1]]
-    dxl.set_positions(degs)
 
 
 if __name__ == "__main__":
@@ -149,7 +126,7 @@ if __name__ == "__main__":
 
     target_pos = np.array([x, y, z])
 
-    circle_drawer(x, y, z, r,  steps=100, speed=25)
+    move_to(x, y, z, r,  steps=100, speed=25)
 
     
 

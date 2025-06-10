@@ -15,13 +15,13 @@ robot_chain = Chain(name='4dof_pen_mount', links=[
     # Joint2: 어깨 Pitch
     DHLink(d=0,  a=a2,  alpha=0,               theta=np.deg2rad(90)),
     # Joint3: 팔 Pitch
-    DHLink(d=0,  a=a3,  alpha=0,               theta=0),
+    DHLink(d=0,  a=a3,  alpha=0,               theta=np.deg2rad(-90)),
     # Joint4: 펜 마운트 (툴링) 회전축을 제어
     DHLink(d=0,  a=a4,  alpha=0,               theta=0),
 ])
 
 # ─── 2) 원 궤적 파라미터 ───────────────────────────────────────
-x0, y0, z0, r0 = 160, 0, 100, 0   # 원의 중심 (mm) & 반지름
+x0, y0, z0, r0 = 160, 0, 100, 50   # 원의 중심 (mm) & 반지름
 steps = 100                        # 분할 개수
 
 # ─── 3) IK → FK → 프레임별 링크 위치 저장 ────────────────────
