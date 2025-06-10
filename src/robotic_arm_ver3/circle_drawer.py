@@ -52,6 +52,9 @@ class DXLController:
         self.packet = PacketHandler(PROTOCOL_VERSION)
         self.sync_write = GroupSyncWrite(self.port, self.packet, ADDR_GOAL_POSITION, 4)
 
+        self.sync_speed = GroupSyncWrite(self.port, self.packet,
+                                         ADDR_MOVING_SPEED, 4)
+
     def enable_torque(self, ids):
         for j in ids:
             self.packet.write1ByteTxRx(self.port, j, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
@@ -81,6 +84,23 @@ class DXLController:
         if comm != COMM_SUCCESS or err != 0:
             raise RuntimeError(f"Dxl error ID{j}")
         return dxl2deg(val)
+    
+    def set_speed(self, speed):
+        self.sync_speed.clearParam()
+        for j in JOINT_IDS:
+            # 4바이트 little endian으로 분할
+            param = [
+                speed        & 0xFF,
+                (speed >> 8) & 0xFF,
+                (speed >> 16)& 0xFF,
+                (speed >> 24)& 0xFF,
+            ]
+            if not self.sync_speed.addParam(j, bytes(param)):
+                raise RuntimeError(f"Speed addParam 실패 ID={j}")
+        if self.sync_speed.txPacket() != COMM_SUCCESS:
+            raise RuntimeError("Speed SyncWrite error")
+        self.sync_speed.clearParam()
+
 
     def close(self):
         self.port.closePort()
@@ -108,8 +128,13 @@ def circle_drawer(x, y, z, r, steps=100, speed=50):
     arc_len = 2 * np.pi * r / steps
     dt = arc_len / speed
 
+    dxl.set_speed(25)
+
+    move_to(x+r,y,z+20)
+    time.sleep(1)
+
     for i in range(steps):
-        theta = 2 * np.pi * i / steps
+        theta = 2 * np.pi * 1.1 * i / steps
         px = x + r * np.cos(theta)
         py = y + r * np.sin(theta)
         pz = z
@@ -124,14 +149,15 @@ def circle_drawer(x, y, z, r, steps=100, speed=50):
 
         dxl.set_positions(degs)
         time.sleep(dt)
+    time.sleep(0.1)
 
-    px = x + r * np.cos(0)
-    py = y + r * np.sin(0)
-    pz = z
+    move_to(px, py, pz+20)
 
-    ik_results = robot_chain.inverse_kinematics([px, py, pz])
-    degs = [np.rad2deg(ang) for ang in ik_results[1:len(JOINT_IDS) + 1]]
-    dxl.set_positions(degs)
+    # ik_results = robot_chain.inverse_kinematics([px, py, pz],
+    #                                             orientation_mode='Y',
+    #                                             target_orientation=[0, 0, 1])
+    # degs = [np.rad2deg(ang) for ang in ik_results[1:len(JOINT_IDS) + 1]]
+    # dxl.set_positions(degs)
 
 
 if __name__ == "__main__":
@@ -139,9 +165,13 @@ if __name__ == "__main__":
     dxl.enable_torque(JOINT_IDS)
 
     # 초기 위치 설정
+    dxl.set_speed(25)
     initial_positions = [0, 0, 0, 0]
-    dxl.set_positions(initial_positions)
-    time.sleep(1)
+    # dxl.set_positions(initial_positions)
+    # time.sleep(1)
+    move_to(260,0,50)
+    
+    
 
     print("\n 목표 위치와 반지름을 입력 (X,Y,Z,R 단위 : mm)")
     target_str = input("목표 위치: ")
@@ -149,9 +179,11 @@ if __name__ == "__main__":
 
     target_pos = np.array([x, y, z])
 
-    circle_drawer(x, y, z, r,  steps=100, speed=25)
+    circle_drawer(x, y, z, r,  steps=200, speed=25)
+    time.sleep(1)
 
-    
+    dxl.set_positions(initial_positions)
+    time.sleep(1)
 
     # dxl.disable_torque(JOINT_IDS)
     dxl.close()

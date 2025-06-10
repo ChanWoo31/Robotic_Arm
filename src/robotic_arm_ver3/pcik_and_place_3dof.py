@@ -55,7 +55,8 @@ robot_chain = Chain(name='4dof_dxl', links=[
 
     DHLink(d=0, a=a3, alpha=0, theta=np.deg2rad(-90)),
 
-    DHLink(d=0, a=a4, alpha=0, theta=np.deg2rad(90)),
+    DHLink(d=0, a=a4, alpha=0, theta=np.deg2rad(0)),
+
 
 ])
 
@@ -242,11 +243,11 @@ if __name__ == "__main__":
     time.sleep(1)
 
     print("\n 목표 L1, L2, ang1, ang2 입력 (L1, L2, ang1, ang2 단위 : mm)")
-
     target_str = input("목표 위치: ")
+    x, y, z = map(float, target_str1.strip().split(","))
     L1, L2, ang1, ang2 = map(float, target_str.strip().split(","))
-    L1 += 103.5
-    L2 += 103.5
+    L1 -= 103.5
+    L2 -= 103.5
     offset = 103.5
 
     # support
@@ -255,47 +256,30 @@ if __name__ == "__main__":
     x2, y2, z2 = L2*np.cos(np.deg2rad(ang2)), L2 * np.sin(np.deg2rad(ang2)), drawer_height
 
     drawer_close = np.array([(L2 - 10) * np.cos(np.deg2rad(ang2)),(L2 - 10) * np.sin(np.deg2rad(ang2)), 25+offset])
-    drawer_close_high = np.array([(L2 - 10) * np.cos(np.deg2rad(ang2)),(L2 - 10) * np.sin(np.deg2rad(ang2)), 25 + box_full_size+offset])
-    drawer_open = np.array([(L2 - 50) * np.cos(np.deg2rad(ang2)),(L2 - 50) * np.sin(np.deg2rad(ang2)), 25+offset])
-    num_points = 10
-    z = 25 + offset
-    theta = np.deg2rad(ang2)
-
-    # 반경을 10등분
-    radii = np.linspace(L2 - 10, L2 - 50, num_points)
-
-    # 10개의 포인트 생성
-    points = np.column_stack([
-        radii * np.cos(theta),  # x
-        radii * np.sin(theta),  # y
-        np.full(num_points, z)  # z
-    ])
-
-    block_1 = np.array([(L2 + 80) * np.cos(np.deg2rad(ang2)), (L2 + 80) * np.sin(np.deg2rad(ang2)), 130+offset])
-    block_1_high = np.array([(L2 + 80) * np.cos(np.deg2rad(ang2)), (L2 + 80) * np.sin(np.deg2rad(ang2)), 130 + box_full_size+offset])
-    block_2 = np.array([(L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size+offset])
+    drawer_open = np.array([(L2 - 30) * np.cos(np.deg2rad(ang2)),(L2 - 30) * np.sin(np.deg2rad(ang2)), 25])
+    block_1 = np.array([(L2 + 80) * np.cos(np.deg2rad(ang2)), (L2 + 80) * np.sin(np.deg2rad(ang2)), 130])
+    block_1_high = np.array([(L2 + 80) * np.cos(np.deg2rad(ang2)), (L2 + 80) * np.sin(np.deg2rad(ang2)), 130 + box_full_size])
+    block_2 = np.array([(L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size])
     block_2_high = np.array([(L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130])
-    block_3 = np.array([(L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size+offset])
-    block_3_high = np.array([(L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130+offset])
-    block_throw = np.array([(L2 - 30) * np.cos(np.deg2rad(ang2)), (L2 - 30) * np.sin(np.deg2rad(ang2)), drawer_height + 2 * box_full_size+offset])
+    block_3 = np.array([(L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size])
+    block_3_high = np.array([(L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130])
+    block_throw = np.array([(L2 - 30) * np.cos(np.deg2rad(ang2)), (L2 - 30) * np.sin(np.deg2rad(ang2)), drawer_height + 2 * box_full_size])
+
+    print(drawer_close)
 
 
-    move_to(*drawer_close_high, speed=50)
-    time.sleep(0.5)
+    # move_to(x, y, z, speed=50)
 
 
     move_to(*drawer_close, speed=50)
-    time.sleep(0.5)
+    time.sleep(200)
+    # time.sleep(200)
 
-    dxl.grip_with_current(position_deg = GRIPPER_SEORAP_GRIP_POSITION, current_mA = 500, speed = 30)
-    time.sleep(2)
+    # dxl.grip_with_current(position_deg = GRIPPER_SEORAP_GRIP_POSITION, current_mA = 500, speed = 30)
+    # time.sleep(1)
 
-    for pt in points:
-        move_to(*pt, speed=50)
-        time.sleep(0.5)
-
-    move_to(*drawer_open, speed=50)
-    time.sleep(0.5)
+    # move_to(*drawer_open, speed=50)
+    # time.sleep(1)
 
     # dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
     # time.sleep(1)
