@@ -4,7 +4,7 @@ import time
 from ikpy.link import OriginLink, DHLink
 from ikpy.chain import Chain
 
-d1 = 112.25
+d1 = 162.25
 a2, a3, a4 = 140.0, 140.0, 103.5
 
 DIRECTION = [ 1, 1, 1, 1]
@@ -25,7 +25,7 @@ ADDR_GOAL_CURRENT = 102
 
 GRIPPER_ID = 5
 GRIPPER_OPEN_POSITION = 0
-GRIPPER_BOX_GRIP_POSITION = -30
+GRIPPER_BOX_GRIP_POSITION = -40
 GRIPPER_SEORAP_GRIP_POSITION = -75
 
 #drawer
@@ -56,6 +56,18 @@ robot_chain = Chain(name='4dof_dxl', links=[
     DHLink(d=0, a=a3, alpha=0, theta=np.deg2rad(-90)),
 
     DHLink(d=0, a=a4, alpha=0, theta=np.deg2rad(90)),
+
+])
+
+robot_chain_90 = Chain(name='4dof_dxl_90', links=[
+    OriginLink(),
+    DHLink(d=d1, a=0, alpha=np.deg2rad(90), theta=0),
+
+    DHLink(d=0, a=a2, alpha=0, theta=np.deg2rad(90)),
+
+    DHLink(d=0, a=a3, alpha=0, theta=np.deg2rad(-90)),
+
+    DHLink(d=0, a=a4, alpha=0, theta=np.deg2rad(0)),
 
 ])
 
@@ -129,44 +141,7 @@ class DXLController:
             raise RuntimeError("Speed SyncWrite error")
         self.sync_speed.clearParam()
 
-    # def grip(self, speed=20):
-        
-    #     self.set_speed(speed)
-    #     raw = deg2dxl(GRIPPER_CLOSE_POSITION)
-    #     param = [
-    #         raw        & 0xFF,
-    #         (raw >>  8)& 0xFF,
-    #         (raw >> 16)& 0xFF,
-    #         (raw >> 24)& 0xFF,
-    #     ]
-    #     self.packet.write4ByteTxRx(self.port,
-    #                                GRIPPER_ID,
-    #                                ADDR_GOAL_POSITION,
-    #                                raw)
     
-    # def box_grip(self, speed=20):
-
-    #     self.set_speed(speed)
-    #     raw = deg2dxl(GRIPPER_CLOSE_POSITION)
-    #     param = [
-    #         raw        & 0xFF,
-    #         (raw >>  8)& 0xFF,
-    #         (raw >> 16)& 0xFF,
-    #         (raw >> 24)& 0xFF,
-    #     ]
-    #     self.packet.write4ByteTxRx(self.port,
-    #                                GRIPPER_ID,
-    #                                ADDR_GOAL_POSITION,
-    #                                raw)
-
-
-    # def ungrip(self, speed=20):
-    #     self.set_speed(speed)
-    #     raw = deg2dxl(GRIPPER_OPEN_POSITION)
-    #     self.packet.write4ByteTxRx(self.port,
-    #                                GRIPPER_ID,
-    #                                ADDR_GOAL_POSITION,
-    #                                raw)
 
     def set_gripper_current(self, current_mA: int):
         lo = current_mA & 0xFF
@@ -222,6 +197,47 @@ def move_to(x, y, z, speed=50):
     dist=np.linalg.norm(np.array([x, y, z]) - p_current)
     time.sleep(dist/speed)
 
+def move_to_90(x, y, z, speed=50):
+    current_deg = [dxl.get_position(j) for j in JOINT_IDS]
+    current_rad = [0.0] + [np.deg2rad(d) for d in current_deg]
+    T_current = robot_chain_90.forward_kinematics(current_rad)
+    p_current = T_current[:3, 3]
+
+    ik_full = robot_chain_90.inverse_kinematics(
+        target_position=[x, y, z],
+        orientation_mode='Y',
+        target_orientation=[0, 0, 1]  # Z축과 정렬
+    )
+    target_rad = ik_full[1:len(JOINT_IDS) + 1]
+    target_deg = [np.rad2deg(ang) for ang in target_rad]
+
+    dxl.set_positions(target_deg)
+
+    dist=np.linalg.norm(np.array([x, y, z]) - p_current)
+    time.sleep(dist/speed)
+
+
+def generate_linear_path(start, end, num_points=10):
+    return np.linspace(start, end, num_points)
+
+def move_along_path(path, speed=50):
+    for pt in path:
+        move_to(*pt, speed=speed)
+        time.sleep(0.5)
+
+def move_along_path_90(path, speed=50):
+    for pt in path:
+        move_to_90(*pt, speed=speed)
+        time.sleep(0.5)
+
+# def Read_my_position():
+#     DXL_pos = dxl.get_position(JOINT_IDS)
+#     DXL_pos = np.array(DXL_pos)
+#     end_effector_frame = robot_chain.forward_kinematics(DXL_pos)
+
+#     position = end_effector_frame[:3, 3]
+#     print("엔드이펙스 위치 :", position)
+
 
 if __name__ == "__main__":
     dxl = DXLController()
@@ -244,9 +260,9 @@ if __name__ == "__main__":
     print("\n 목표 L1, L2, ang1, ang2 입력 (L1, L2, ang1, ang2 단위 : mm)")
 
     target_str = input("목표 위치: ")
-    L1, L2, ang1, ang2 = map(float, target_str.strip().split(","))
-    L1 += 103.5
-    L2 += 103.5
+    tar_L1, tar_L2, ang1, ang2 = map(float, target_str.strip().split(","))
+    L1 = tar_L1 + 103.5
+    L2 = tar_L2 + 103.5
     offset = 103.5
 
     # support
@@ -254,35 +270,42 @@ if __name__ == "__main__":
     # drawer
     x2, y2, z2 = L2*np.cos(np.deg2rad(ang2)), L2 * np.sin(np.deg2rad(ang2)), drawer_height
 
-    drawer_close = np.array([(L2 - 10) * np.cos(np.deg2rad(ang2)),(L2 - 10) * np.sin(np.deg2rad(ang2)), 25+offset])
-    drawer_close_high = np.array([(L2 - 10) * np.cos(np.deg2rad(ang2)),(L2 - 10) * np.sin(np.deg2rad(ang2)), 25 + box_full_size+offset])
-    drawer_open = np.array([(L2 - 50) * np.cos(np.deg2rad(ang2)),(L2 - 50) * np.sin(np.deg2rad(ang2)), 25+offset])
-    num_points = 10
-    z = 25 + offset
-    theta = np.deg2rad(ang2)
+    # 서랍 size = 130mm
+    # 서랍 열고 닫기
+    drawer_close = np.array([(L2 - 20) * np.cos(np.deg2rad(ang2)),(L2 - 20) * np.sin(np.deg2rad(ang2)), 25+offset])
+    drawer_close_high = np.array([(L2 - 20) * np.cos(np.deg2rad(ang2)),(L2 - 20) * np.sin(np.deg2rad(ang2)), 25 + 4*box_full_size+offset])
+    drawer_open = np.array([(L2 - 60) * np.cos(np.deg2rad(ang2)),(L2 - 50) * np.sin(np.deg2rad(ang2)), 25+offset])
+    drawer_open_high = np.array([(L2 - 70) * np.cos(np.deg2rad(ang2)),(L2 - 70) * np.sin(np.deg2rad(ang2)), 25 + 6*box_full_size+offset])
+    
+    opening_drawer = generate_linear_path(drawer_close, drawer_open, num_points=10)
 
-    # 반경을 10등분
-    radii = np.linspace(L2 - 10, L2 - 50, num_points)
+    # block 위치
+    box_1 = np.array([(L2 + 2 * box_full_size + 0.5 * box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 2 * box_full_size + 0.5 * box_half_size) * np.sin(np.deg2rad(ang2)), 130+offset])
+    box_1_high_front = np.array([(L2 +  box_full_size + 0.5 * box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + box_full_size + 0.5 * box_half_size) * np.sin(np.deg2rad(ang2)), 130 + 1 * box_full_size + offset])
+    box_1_high = np.array([(L2 + 2 * box_full_size + 0.5 * box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 2 * box_full_size + 0.5 * box_half_size) * np.sin(np.deg2rad(ang2)), 130 + 1 * box_full_size + offset])
+    box_2 = np.array([(L2 + 2 * box_full_size) * np.cos(np.deg2rad(ang2)), (L2 + 2 * box_full_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size+offset])
+    box_2_high = np.array([(L2 + 2 * box_full_size) * np.cos(np.deg2rad(ang2)), (L2 + 2 * box_full_size) * np.sin(np.deg2rad(ang2)), 130+offset])
+    box_3 = np.array([(L2 + 3 * box_full_size) * np.cos(np.deg2rad(ang2)), (L2 + 3 * box_full_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size+offset])
+    box_3_high = np.array([(L2 + 3 * box_full_size) * np.cos(np.deg2rad(ang2)), (L2 + 3 * box_full_size) * np.sin(np.deg2rad(ang2)), 130+offset])
+    box_throw = np.array([(L2 - 30) * np.cos(np.deg2rad(ang2)), (L2 - 30) * np.sin(np.deg2rad(ang2)), drawer_height + 2 * box_full_size+offset])
+    box_throw_high = np.array([(L2 - 30) * np.cos(np.deg2rad(ang2)), (L2 - 30) * np.sin(np.deg2rad(ang2)), drawer_height + 4 * box_full_size+offset])
 
-    # 10개의 포인트 생성
-    points = np.column_stack([
-        radii * np.cos(theta),  # x
-        radii * np.sin(theta),  # y
-        np.full(num_points, z)  # z
-    ])
+    # # block 1, 2, 3 위치 + 90도 회전
+    # # block 위치
+    # box_1_90 = np.array([(tar_L2 + 2 * box_full_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + 2 * box_full_size) * np.sin(np.deg2rad(ang2)), 130])
+    # box_1_high_90 = np.array([(tar_L2 + 2 * box_full_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + 2 * box_full_size) * np.sin(np.deg2rad(ang2)), 130 + 2 * box_full_size])
+    # box_1_front_90 = np.array([(tar_L2 + box_full_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + box_full_size) * np.sin(np.deg2rad(ang2)), 130 - 2*box_full_size])
+    # box_1_high_front_90 = np.array([(tar_L2 + box_full_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + box_full_size) * np.sin(np.deg2rad(ang2)), 130 + 2* box_full_size])
+    # box_2_90 = np.array([(tar_L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size])
+    # box_2_high_90 = np.array([(tar_L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130])
+    # box_3_90 = np.array([(tar_L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size])
+    # box_3_high_90 = np.array([(tar_L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (tar_L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130])
+    # box_throw_90 = np.array([(tar_L2 - 20) * np.cos(np.deg2rad(ang2)), (tar_L2 - 20) * np.sin(np.deg2rad(ang2)), drawer_height + 2 * box_full_size])
+    # box_throw_high_90 = np.array([(tar_L2 - 20) * np.cos(np.deg2rad(ang2)), (tar_L2 - 20) * np.sin(np.deg2rad(ang2)), drawer_height + 4 * box_full_size])
 
-    block_1 = np.array([(L2 + 80) * np.cos(np.deg2rad(ang2)), (L2 + 80) * np.sin(np.deg2rad(ang2)), 130+offset])
-    block_1_high = np.array([(L2 + 80) * np.cos(np.deg2rad(ang2)), (L2 + 80) * np.sin(np.deg2rad(ang2)), 130 + box_full_size+offset])
-    block_2 = np.array([(L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size+offset])
-    block_2_high = np.array([(L2 + 80 - box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 - box_half_size) * np.sin(np.deg2rad(ang2)), 130])
-    block_3 = np.array([(L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130 - box_full_size+offset])
-    block_3_high = np.array([(L2 + 80 + box_half_size) * np.cos(np.deg2rad(ang2)), (L2 + 80 + box_half_size) * np.sin(np.deg2rad(ang2)), 130+offset])
-    block_throw = np.array([(L2 - 30) * np.cos(np.deg2rad(ang2)), (L2 - 30) * np.sin(np.deg2rad(ang2)), drawer_height + 2 * box_full_size+offset])
-
-
+    # 서랍 열기
     move_to(*drawer_close_high, speed=50)
     time.sleep(0.5)
-
 
     move_to(*drawer_close, speed=50)
     time.sleep(0.5)
@@ -290,12 +313,97 @@ if __name__ == "__main__":
     dxl.grip_with_current(position_deg = GRIPPER_SEORAP_GRIP_POSITION, current_mA = 500, speed = 30)
     time.sleep(2)
 
-    for pt in points:
-        move_to(*pt, speed=50)
-        time.sleep(0.5)
+    move_along_path(opening_drawer, speed=50)
+    time.sleep(1)
 
-    move_to(*drawer_open, speed=50)
-    time.sleep(0.5)
+    dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+
+    drawer_open_high = generate_linear_path(drawer_open, drawer_open_high, num_points=3)
+    move_along_path(drawer_open_high, speed=50)
+    time.sleep(1)
+
+    # 서랍에서 블록 1 집기
+    # move_to(*box_1_high_front, speed=50)
+    # time.sleep(1.5)
+    # move_to(*box_1_high, speed=50)
+    # time.sleep(1.5)
+    box1_path = generate_linear_path(box_1_high_front, box_1_high, num_points=4)
+    move_along_path(box1_path, speed=50)
+    time.sleep(1.5)
+    # move_to(*box_1, speed=50)
+    # time.sleep(1)
+    box_1_grip_path = generate_linear_path(box_1_high, box_1, num_points=4)
+    move_along_path(box_1_grip_path, speed=50)
+    time.sleep(1)
+
+    dxl.grip_with_current(position_deg = GRIPPER_BOX_GRIP_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+    move_to(*box_1_high, speed=50)
+    time.sleep(1)
+    move_to(*box_throw_high, speed=50)
+    time.sleep(1)
+    move_to(*box_throw, speed=50)
+    time.sleep(2)
+    dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+    move_to(*box_throw_high, speed=70)
+    time.sleep(1)
+
+    # 서랍에서 블록 2 집기
+    box2_path = generate_linear_path(box_throw_high, box_2_high, num_points=6)
+    move_along_path(box1_path, speed=50)
+    time.sleep(1.5)
+
+    box_2_grip_path = generate_linear_path(box_2_high, box_2, num_points=4)
+    move_along_path(box_2_grip_path, speed=50)
+    time.sleep(1)
+
+    dxl.grip_with_current(position_deg = GRIPPER_BOX_GRIP_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+    move_to(*box_2_high, speed=50)
+    time.sleep(1)
+    move_to(*box_throw_high, speed=50)
+    time.sleep(1)
+    move_to(*box_throw, speed=50)
+    time.sleep(2)
+    dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+    move_to(*box_throw_high, speed=70)
+    time.sleep(1)
+
+    # 서랍에서 블록 3 집기
+    box3_path = generate_linear_path(box_throw_high, box_3_high, num_points=6)
+    move_along_path(box1_path, speed=50)
+    time.sleep(1.5)
+
+    box_3_grip_path = generate_linear_path(box_3_high, box_3, num_points=4)
+    move_along_path(box_3_grip_path, speed=50)
+    time.sleep(1)
+
+    dxl.grip_with_current(position_deg = GRIPPER_BOX_GRIP_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+    move_to(*box_3_high, speed=50)
+    time.sleep(1)
+    move_to(*box_throw_high, speed=50)
+    time.sleep(1)
+    move_to(*box_throw, speed=50)
+    time.sleep(2)
+    dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
+    time.sleep(1)
+
+
+
+
+
+
+
+
+
+    # move_to(*drawer_open, speed=50)
+    # time.sleep(0.5)
+
+
 
     # dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
     # time.sleep(1)
@@ -329,7 +437,7 @@ if __name__ == "__main__":
 
 
 
-    dxl.grip_with_current(position_deg = GRIPPER_SEORAP_GRIP_POSITION, current_mA = 500, speed = 30)
+    # dxl.grip_with_current(position_deg = GRIPPER_SEORAP_GRIP_POSITION, current_mA = 500, speed = 30)
     # time.sleep(3)
     # dxl.grip_with_current(position_deg = GRIPPER_OPEN_POSITION, current_mA = 500, speed = 30)
     # time.sleep(1)
