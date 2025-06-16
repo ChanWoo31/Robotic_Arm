@@ -11,7 +11,7 @@ a2, a3, a4 = 140.0, 140.0, 103.5
 DIRECTION = [ 1, 1, 1, 1]
 
 JOINT_IDS = [1, 2, 3, 4]
-DEVICENAME = 'COM6'
+DEVICENAME = '/dev/ttyUSB1'
 BAUDRATE = 1000000
 PROTOCOL_VERSION = 2.0
 ADDR_TORQUE_ENABLE = 64
@@ -53,7 +53,7 @@ def dxl2deg(raw: int) -> float:
 
 robot_chain = Chain(name='4dof_dxl', links=[
     OriginLink(),
-    DHLink(d=d1, a=0, alpha=np.deg2rad(90), theta=0),
+    DHLink(d=d1, a=0, alpha=np.deg2rad(90), theta=-31.2),
 
     DHLink(d=0, a=a2, alpha=0, theta=np.deg2rad(90)),
 
