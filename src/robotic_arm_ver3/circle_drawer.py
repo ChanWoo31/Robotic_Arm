@@ -205,37 +205,59 @@ def move_to(x, y, z, speed):
 
 measured_radii = {
     10: {
-        0.0:        9.8,    #  0° (→)
-        np.pi/2:    10.1,   # 90° (↑)
-        np.pi:      9.7,    #180° (←)
-        3*np.pi/2:  10.0    #270° (↓)
+        0.0:           7.5,
+        np.pi/4:       7.0,
+        np.pi/2:       8,
+        3*np.pi/4:     10,
+        np.pi:         12.5,
+        5*np.pi/4:     12,
+        3*np.pi/2:     10,
+        7*np.pi/4:     9.9
     },
     20: {
-        0.0:        19.6,
-        np.pi/2:    20.3,
-        np.pi:      19.4,
-        3*np.pi/2:  20.1
+        0.0:          17.5,
+        np.pi/4:      16,
+        np.pi/2:      15,
+        3*np.pi/4:    20,
+        np.pi:        22.5,
+        5*np.pi/4:    24,
+        3*np.pi/2:    20.0,
+        7*np.pi/4:    19.9
     },
     30: {
-        0.0:        29.4,
-        np.pi/2:    30.2,
-        np.pi:      29.1,
-        3*np.pi/2:  30.0
+        0.0:          27,
+        np.pi/4:      27,
+        np.pi/2:      26,
+        3*np.pi/4:    30,
+        np.pi:        30,
+        5*np.pi/4:    32,
+        3*np.pi/2:    30.0,
+        7*np.pi/4:    30
     },
     40: {
-        0.0:        39.0,
-        np.pi/2:    37.0,
-        np.pi:      36.0,
-        3*np.pi/2:  40.0
+        0.0:          37.0,
+        np.pi/4:      36.0,
+        np.pi/2:      35.0,
+        3*np.pi/4:    40.0,
+        np.pi:        39,
+        5*np.pi/4:    42,
+        3*np.pi/2:    40.5,
+        7*np.pi/4:    40
+    },
+    50: {
+        0.0:          47.0,
+        np.pi/4:      45.0,
+        np.pi/2:      45.0,
+        3*np.pi/4:    48.0,
+        np.pi:        47,
+        5*np.pi/4:    50,
+        3*np.pi/2:    50,
+        7*np.pi/4:    50
     }
 }
 
 def circle_drawer(x, y, z, r, steps=200, speed=50):
-    """
-    (x,y) 중심, 높이 z 에서 반지름 r짜리 원 궤적을 그립니다.
-    r 값이 10, 20, 30, 40 중 하나면 4방향 보정 적용,
-    그 외 값이면 보정 없이 그립니다.
-    """
+    
     z_cmd = z + z_offset
     arc_len = 2 * np.pi * r / steps
     dt = arc_len / speed
@@ -259,7 +281,7 @@ def circle_drawer(x, y, z, r, steps=200, speed=50):
 
     # 궤적 실행
     for i in range(steps + 1):
-        theta = 2 * np.pi * i / steps
+        theta = 2.2 * np.pi * i / steps
         s = get_scale(theta)
 
         dx = r * np.cos(theta) * s
