@@ -224,6 +224,16 @@ measured_radii = {
         3*np.pi/2:    20.0,
         7*np.pi/4:    19.9
     },
+    25: {
+        0.0:          22,
+        np.pi/4:      21,
+        np.pi/2:      20,
+        3*np.pi/4:    22,
+        np.pi:        26,
+        5*np.pi/4:    25,
+        3*np.pi/2:    25.0,
+        7*np.pi/4:    24
+    },
     30: {
         0.0:          27,
         np.pi/4:      27,
@@ -266,9 +276,11 @@ measured_radii = {
     }
 }
 
-def circle_drawer(x, y, z, r, steps=200, speed=50):
+def circle_drawer(x, y, z, r, steps=200, speed=25):
 
-    
+    if r == 10:
+        speed = 25
+        z=5
     
     z_cmd = z + z_offset
     arc_len = 2 * np.pi * r / steps
@@ -309,7 +321,7 @@ def circle_drawer(x, y, z, r, steps=200, speed=50):
 
     # 궤적 실행
     for i in range(steps + 1):
-        theta = 2*2 * np.pi * i / steps
+        theta = 2.3 * np.pi * i / steps
         s = get_scale(theta)
 
         dx = r * np.cos(theta) * s
@@ -338,7 +350,7 @@ if __name__ == "__main__":
 
     target_str = input("반지름 확인 x만: ")
     x = float(target_str.strip().split(",")[0])  # 첫 번째 값만 사용
-    target_pos = np.array([x, 0.0, 1.0])
+    target_pos = np.array([230, 0, 10.0])
     print(target_pos)
     move_to(*target_pos,30)
     time.sleep(1)
@@ -358,6 +370,8 @@ if __name__ == "__main__":
     # target_pos = np.array([x+r, y, 20])
     # move_to(*target_pos,30)
     # time.sleep(1)
+    move_to(x+r, y, z+40, speed=25)
+    time.sleep(2)
     circle_drawer(x, y, z, r,  steps=200, speed=50)
     time.sleep(1)
 
@@ -368,11 +382,14 @@ if __name__ == "__main__":
     dxl.set_positions(initial_positions)
     time.sleep(3)
 
-    dxl.move_joint(2,300)
-    time.sleep(1)
-
     dxl.move_joint(4,-300)
-    time.sleep(1)
+    time.sleep(2)
+
+    dxl.move_joint(2,300)
+    time.sleep(2)
+
+    
+
     circle_drawer(x2, y2, z2, r2,  steps=200, speed=50)
     time.sleep(1)
 
